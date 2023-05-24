@@ -35,6 +35,9 @@ thresholdMap = dict({
 IPMI_COMMAND_PREFIX = 'ipmitool -H 192.168.1.160 -U ADMIN -f /root/ipmiPassword -I lanplus '
 IPMI_SENSOR_COMMAND = IPMI_COMMAND_PREFIX + 'sensor'
 IPMI_FAN_COMMAND_PREFIX = IPMI_COMMAND_PREFIX + 'raw 0x30 0x70 0x66 0x01 '
+IPMI_FALLBACK_COMMAND_PREFIX = 'ipmitool '
+IPMI_FALLBACK_SENSOR_COMMAND = IPMI_FALLBACK_COMMAND_PREFIX + 'sensor'
+IPMI_FALLBACK_FAN_COMMAND_PREFIX = IPMI_FALLBACK_COMMAND_PREFIX + 'raw 0x30 0x70 0x66 0x01 '
 
 debounceArray = [-1] * DEBOUNCE_LENGTH
 debounceIndex = 0
@@ -48,13 +51,7 @@ def qprint(string):
         print(string)
 
 
-qprint(thresholdMap)
-
-while True:
-    stream = os.popen(IPMI_SENSOR_COMMAND)
-    readings = dict()
-    maxSetspeed = -1
-    hottestDevice = ['', -1]
+def parseIpmiSensorOutput(stream, readings):
     for line in stream.readlines():
         if not 'degrees' in line:
             continue
@@ -63,6 +60,20 @@ while True:
         temp = float(arr[3])
         limit = float(arr[16])
         readings[name] = temp
+
+
+qprint(thresholdMap)
+
+while True:
+    stream = os.popen(IPMI_SENSOR_COMMAND)
+    readings = dict()
+    maxSetspeed = -1
+    hottestDevice = ['', -1]
+    parseIpmiSensorOutput(stream, readings)
+    if 'CPU1' not in readings:
+        print('Warning: using fallback IPMI sensor command', flush=True)
+        stream = os.popen(IPMI_FALLBACK_SENSOR_COMMAND)
+        parseIpmiSensorOutput(stream, readings)
     stream = os.popen('hddtemp')
     for line in stream.readlines():
         arr = line.split()
@@ -101,10 +112,16 @@ while True:
     if previousSpeed != debouncedSpeed:
         command = IPMI_FAN_COMMAND_PREFIX + '0 ' + str(debouncedSpeed)
         qprint(command)
-        subprocess.run(command.split(), stdout=subprocess.DEVNULL)
+        result = subprocess.run(command.split(), stdout=subprocess.DEVNULL)
+        if result.returncode != 0:
+            print('Warning: using fallback IPMI fan command', flush=True)
+            subprocess.run((IPMI_FALLBACK_FAN_COMMAND_PREFIX + '0 ' + str(debouncedSpeed)).split())
         command = IPMI_FAN_COMMAND_PREFIX + '1 ' + str(debouncedSpeed)
         qprint(command)
-        subprocess.run(command.split(), stdout=subprocess.DEVNULL)
+        result = subprocess.run(command.split(), stdout=subprocess.DEVNULL)
+        if result.returncode != 0:
+            print('Warning: using fallback IPMI fan command', flush=True)
+            subprocess.run((IPMI_FALLBACK_FAN_COMMAND_PREFIX + '1 ' + str(debouncedSpeed)).split())
     if debouncedSpeed == MIN_FAN and debouncedSpeed != previousSpeed:
         print('Reset fan speed to minimum (' + str(debouncedSpeed) + ')', flush=True)
     previousSpeed = debouncedSpeed
