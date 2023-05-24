@@ -4,11 +4,14 @@ import os
 import time
 import sys
 import subprocess
+import datetime
+import time
 
 MIN_FAN = 25
 MAX_FAN = 100
 DEBOUNCE_LENGTH = 20
 SLEEP_TIME = 1
+HDD_TEMP_QUERY_PERIOD = 180
 
 thresholdMap = dict({
     'CPU1': [50, 80],
@@ -63,10 +66,11 @@ def parseIpmiSensorOutput(stream, readings):
 
 
 qprint(thresholdMap)
+lastHddQuery = time.time() - (60 * 60 * 24) # Pretend our last HDD read was 24h ago
+readings = dict()
 
 while True:
     stream = os.popen(IPMI_SENSOR_COMMAND)
-    readings = dict()
     maxSetspeed = -1
     hottestDevice = ['', -1]
     parseIpmiSensorOutput(stream, readings)
@@ -74,12 +78,15 @@ while True:
         print('Warning: using fallback IPMI sensor command', flush=True)
         stream = os.popen(IPMI_FALLBACK_SENSOR_COMMAND)
         parseIpmiSensorOutput(stream, readings)
-    stream = os.popen('hddtemp')
-    for line in stream.readlines():
-        arr = line.split()
-        name = arr[0][:-1]
-        temp = float(arr[len(arr) - 1][:-2])
-        readings[name] = temp
+    if time.time() - lastHddQuery > HDD_TEMP_QUERY_PERIOD:
+        qprint(str(datetime.datetime.now()) + ' - Querying hddtemp')
+        stream = os.popen('hddtemp')
+        lastHddQuery = time.time()
+        for line in stream.readlines():
+            arr = line.split()
+            name = arr[0][:-1]
+            temp = float(arr[len(arr) - 1][:-2])
+            readings[name] = temp
     qprint(readings)
     for name in thresholdMap:
         temp = readings[name]
